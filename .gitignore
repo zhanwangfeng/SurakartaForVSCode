@@ -1,0 +1,27 @@
+# 依赖
+node_modules/
+
+# 编译输出
+out/
+
+# 测试
+.vscode-test/
+
+# 打包产物
+*.vsix
+
+# 日志
+*.log
+npm-debug.log*
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 编辑器/IDE 本地缓存
+*.tsbuildinfo
+
+# 保留调试与编辑器配置（F5 启动所需）
+!.vscode/settings.json
+!.vscode/launch.json
+!.vscode/tasks.json

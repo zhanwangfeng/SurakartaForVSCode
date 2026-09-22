@@ -1,0 +1,98 @@
+{
+  "name": "surakarta-vscode",
+  "displayName": "Surakarta",
+  "description": "VS Code 里的苏拉卡尔塔（Surakarta）棋盘小游戏：双人对战或与 AI 对弈，沿同心弧线绕行吃子。",
+  "version": "0.1.0",
+  "publisher": "zhanwangfeng",
+  "license": "MIT",
+  "icon": "resources/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "surakarta",
+    "game",
+    "苏拉卡尔塔",
+    "棋盘",
+    "对战",
+    "游戏"
+  ],
+  "files": [
+    "out",
+    "resources",
+    "src/webview",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "activationEvents": [
+    "onView:surakarta.modes",
+    "onCommand:surakarta.open"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "surakarta",
+          "title": "Surakarta",
+          "icon": "resources/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "surakarta": [
+        {
+          "id": "surakarta.modes",
+          "name": "对战模式",
+          "icon": "resources/icon.png",
+          "contextualTitle": "Surakarta"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "surakarta.open",
+        "title": "Surakarta: 打开游戏"
+      },
+      {
+        "command": "surakarta.restart",
+        "title": "Surakarta: 重开一局"
+      },
+      {
+        "command": "surakarta.openWeb",
+        "title": "Surakarta: 打开网页版",
+        "icon": "$(globe)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "surakarta.openWeb",
+          "when": "view == surakarta.modes",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc --noEmit -p ./ && esbuild src/extension.ts --bundle --platform=node --target=node16 --outfile=out/extension.js --external:vscode",
+    "watch": "tsc --noEmit -p ./ & esbuild src/extension.ts --bundle --platform=node --target=node16 --outfile=out/extension.js --external:vscode --watch",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.2",
+    "esbuild": "^0.23.1",
+    "typescript": "^5.3.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zhanwangfeng/SurakartaForVSCode.git"
+  }
+}

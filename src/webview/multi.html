@@ -1,0 +1,1067 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>苏拉卡尔塔（Surakarta）</title>
+<style>
+  :root{
+    --bg1:#0d1119; --text:#e9e7e3; --muted:#98a2b3;
+    --cw:#f0913c; --ccw:#3fb6d8;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:28px 16px 40px;
+    font-family:"PingFang SC","Microsoft YaHei",-apple-system,"Segoe UI",sans-serif;
+    color:var(--text);
+    background:radial-gradient(1200px 700px at 20% -10%, #1f2a3d 0%, #0d1119 55%, #090c12 100%);
+    min-height:100vh;
+    display:flex; flex-direction:column; align-items:center; gap:16px;
+  }
+  h1{font-size:20px; margin:0; font-weight:600; letter-spacing:.5px}
+  .sub{margin:0; font-size:13px; color:var(--muted); text-align:center}
+  .stage{
+    background:linear-gradient(180deg,#1c2434,#151b26);
+    border:1px solid #263042; border-radius:18px; padding:16px;
+    box-shadow:0 20px 50px rgba(0,0,0,.45);
+  }
+  svg{display:block; width:min(76vmin,620px); height:auto; overflow:visible}
+  .controls{display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:center}
+  button{
+    background:#232c3d; color:var(--text); border:1px solid #2f3a4e; border-radius:10px;
+    padding:8px 14px; font-size:13px; cursor:pointer; transition:.15s; font-family:inherit;
+  }
+  button:hover{background:#2b364a}
+  select{
+    background:#232c3d; color:var(--text); border:1px solid #2f3a4e;
+    border-radius:10px; padding:8px 10px; font-size:13px; font-family:inherit; cursor:pointer;
+  }
+  select:disabled{opacity:.45; cursor:not-allowed}
+  label.sw{display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); cursor:pointer}
+  .legend{display:flex; gap:20px; flex-wrap:wrap; justify-content:center; font-size:13px; color:var(--muted)}
+  .key{display:flex; align-items:center; gap:7px}
+  .dot{width:13px; height:13px; border-radius:50%}
+  #status{
+    font-size:15px; min-height:22px; text-align:center;
+    background:#161d2a; border:1px solid #263042; border-radius:10px;
+    padding:8px 16px;
+  }
+  #status b{color:#fff}
+  .note{max-width:640px; font-size:13px; line-height:1.75; color:var(--muted); text-align:center}
+</style>
+</head>
+<body>
+<script>window.__MULTI_BOOTSTRAP__ = __MULTI_BOOTSTRAP_VALUE__;</script>
+<h1>苏拉卡尔塔（Surakarta）</h1>
+<p class="sub">5×5 格 = 6×6 交点 · 四角同心双弧（半径 1 格 / 2 格）· 每方 12 子</p>
+
+<div id="net" class="sub"></div>
+
+<div id="lobby">
+  <div class="lobby-title">联机对战</div>
+  <div id="lobby-info" class="sub"></div>
+  <button id="startBtn" class="primary" disabled>等待对手加入…</button>
+  <div class="sub">房主执橙方、客机执蓝方，己方棋子始终显示在下方；由房主点击「开始对战」开局，客机只需等待。</div>
+</div>
+
+<div class="stage"><svg id="board"></svg></div>
+
+<div id="status"></div>
+
+<!-- game.html 脚本会读取 #mode / #diff，联机模式用不到，隐藏保留 -->
+<div style="display:none">
+  <select id="mode"><option value="pvp" selected>双人对战</option><option value="ai">人机对战</option></select>
+  <select id="diff"><option value="2">简单</option><option value="3" selected>普通</option><option value="4">困难</option></select>
+</div>
+
+<div class="controls">
+  <button id="restart">重新开始</button>
+</div>
+
+<div class="legend">
+  <div class="key"><span class="dot" style="background:var(--cw)"></span><span class="pn1">橙方</span></div>
+  <div class="key"><span class="dot" style="background:var(--ccw)"></span><span class="pn2">蓝方</span></div>
+  <div class="key"><span class="dot" style="background:#39d98a"></span>绿圈 = 可吃子落点</div>
+</div>
+
+<p class="note">
+  普通走子：每回合选一枚己方棋子，向<b>八方向</b>走一格到空点。<br />
+  吃子：只能<b>沿弧线箭头方向</b>绕行（不可逆向）；滑行路径上若<b>先碰到己方棋子</b>则不能吃子，若<b>先碰到对方棋子</b>则吃掉该子（只吃第一个碰到的对方棋子）。<br />
+  胜负：一方棋子被吃光则另一方获胜；若双方均无法再吃子，则剩余棋子多者获胜。<br />
+  联机模式：棋盘下方的小圆点表示<b>轮到该方行动</b>（己方回合在下方、对手回合在上方）。
+</p>
+
+<script>
+const NS = 'http://www.w3.org/2000/svg';
+const CELL = 56;
+const PAD  = 2 * CELL + 34;
+
+const C = {
+  board:'#f4ead7', edge:'#6f6350', line:'#8a7c62', dot:'#b6a98d',
+  pin:'#3c3427', cw:'#f0913c', ccw:'#3fb6d8'
+};
+
+const SIZE = 5;            // 5×5 格 => 6×6 交点（固定）
+
+// fx/fy: 角点所在棋盘坐标比例；phi: 棋盘内部象限的起始角（SVG 角度 0=右, 90=下, 顺时针增大）
+const CORNERS = [
+  { fx:0, fy:0, phi:0,   ci:0,      cj:0      },
+  { fx:1, fy:0, phi:90,  ci:SIZE,   cj:0      },
+  { fx:1, fy:1, phi:180, ci:SIZE,   cj:SIZE   },
+  { fx:0, fy:1, phi:270, ci:0,      cj:SIZE   }
+];
+
+const svg = document.getElementById('board');
+
+function el(tag, attrs){
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  return e;
+}
+function pol(cx, cy, r, deg){
+  const a = deg * Math.PI / 180;
+  return { x: cx + r * Math.cos(a), y: cy + r * Math.sin(a) };
+}
+
+function build(n){
+  const board = n * CELL;
+  const size  = board + 2 * PAD;
+  svg.setAttribute('viewBox', '0 0 ' + size + ' ' + size);
+  while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+  const g = el('g');
+
+  g.appendChild(el('rect', { x:PAD, y:PAD, width:board, height:board, rx:8,
+    fill:C.board, stroke:C.edge, 'stroke-width':3 }));
+
+  for (let i = 0; i <= n; i++){
+    const p = PAD + i * CELL;
+    const w = (i === 0 || i === n) ? 3 : 1.6;
+    g.appendChild(el('line', { x1:p, y1:PAD, x2:p, y2:PAD + board, stroke:C.line, 'stroke-width':w }));
+    g.appendChild(el('line', { x1:PAD, y1:p, x2:PAD + board, y2:p, stroke:C.line, 'stroke-width':w }));
+  }
+
+  for (let i = 0; i <= n; i++){
+    for (let j = 0; j <= n; j++){
+      g.appendChild(el('circle', { cx:PAD + i * CELL, cy:PAD + j * CELL, r:3.4, fill:C.dot }));
+    }
+  }
+
+  CORNERS.forEach((c, ci) => {
+    const cx = PAD + c.fx * board;
+    const cy = PAD + c.fy * board;
+
+    [ { r:CELL,      dir: 1, color:C.cw  },
+      { r:2 * CELL,  dir:-1, color:C.ccw } ].forEach((a, ai) => {
+
+      const startDeg = c.phi + (a.dir === 1 ? 90 : 360);
+      const endDeg   = c.phi + (a.dir === 1 ? 360 : 90);
+      const p0 = pol(cx, cy, a.r, startDeg);
+      const p1 = pol(cx, cy, a.r, endDeg);
+
+      const d = 'M ' + p0.x.toFixed(2) + ' ' + p0.y.toFixed(2) +
+                ' A ' + a.r + ' ' + a.r + ' 0 1 ' + (a.dir === 1 ? 1 : 0) +
+                ' ' + p1.x.toFixed(2) + ' ' + p1.y.toFixed(2);
+
+      const pid = 'arc-' + ci + '-' + ai;
+      g.appendChild(el('path', { id:pid, d:d, fill:'none', stroke:C.line,
+        'stroke-width':2.25, 'stroke-linecap':'round' }));
+
+      [p0, p1].forEach(p => {
+        g.appendChild(el('circle', { cx:p.x.toFixed(2), cy:p.y.toFixed(2), r:4.5,
+          fill:C.pin, stroke:C.line, 'stroke-width':2 }));
+      });
+
+      const midDeg = c.phi + 225;
+      const m = pol(cx, cy, a.r, midDeg);
+      const tang = midDeg + 90 * a.dir;
+      g.appendChild(el('path', {
+        d:'M -7 -6 L 11 0 L -7 6 L -3.5 0 Z', fill:C.line,
+        transform:'translate(' + m.x.toFixed(2) + ' ' + m.y.toFixed(2) + ') rotate(' + tang + ')'
+      }));
+    });
+  });
+
+  svg.appendChild(g);
+}
+
+build(SIZE);
+
+/* ===================== 游戏逻辑 ===================== */
+const N = SIZE + 1;                       // 交点数 = 6
+const px = i => PAD + i * CELL;
+const py = j => PAD + j * CELL;
+const key = (i,j) => i + ',' + j;
+const inB = (i,j) => i >= 0 && i < N && j >= 0 && j < N;
+
+const DIRS8 = [
+  {i:0,j:-1},{i:0,j:1},{i:-1,j:0},{i:1,j:0},
+  {i:-1,j:-1},{i:1,j:-1},{i:-1,j:1},{i:1,j:1}
+];
+const DIRS4 = [ {i:0,j:-1},{i:0,j:1},{i:-1,j:0},{i:1,j:0} ];
+const N0={i:0,j:-1}, S0={i:0,j:1}, E0={i:1,j:0}, W0={i:-1,j:0};
+const dirName = d => d.i + ',' + d.j;
+
+// 弧线转换表：在某交点以 din 方向到达 -> 绕角后从 to 以 dout 方向离开
+const TRANS = [];
+// 弧线为单向：只能沿地图箭头方向（与绘制箭头一致）绕行，不可逆向
+// 每条转换额外记录 arcId，对应 svg 中绘制的弧线路径，用于吃子动画沿弧采样
+(function buildTrans(){
+  CORNERS.forEach((c, ci) => {
+    for (const d of [1,2]){
+      const ad = (d === 1) ? 1 : -1;                 // 小弧顺时针(dir:1) / 大弧逆时针(dir:-1)
+      const A = { i:(c.ci===0 ? d : SIZE-d), j:c.cj };
+      const B = { i:c.ci, j:(c.cj===0 ? d : SIZE-d) };
+      const angA = (c.ci===0 ? 0 : 180);             // A 在水平轴
+      const angB = (c.cj===0 ? 90 : 270);            // B 在竖直轴
+      const startDeg = c.phi + (ad===1 ? 90 : 360);
+      const endDeg   = c.phi + (ad===1 ? 360 : 90);
+      const sAng = ((startDeg % 360) + 360) % 360;
+      const eAng = ((endDeg   % 360) + 360) % 360;
+      let startPt, sAng2, endPt, eAng2;
+      if (sAng === angA){ startPt=A; sAng2=angA; endPt=B; eAng2=angB; }
+      else              { startPt=B; sAng2=angB; endPt=A; eAng2=angA; }
+      // 沿弧线行进的切向（与绘制箭头方向完全一致）
+      const tang = (ang, s) => s===1
+        ? { i:-Math.round(Math.sin(ang*Math.PI/180)), j: Math.round(Math.cos(ang*Math.PI/180)) }
+        : { i: Math.round(Math.sin(ang*Math.PI/180)), j:-Math.round(Math.cos(ang*Math.PI/180)) };
+      // ai: 半径 1 格(d=1) -> arc-{ci}-0 ; 半径 2 格(d=2) -> arc-{ci}-1
+      TRANS.push({ from:startPt, din:tang(sAng2, ad), to:endPt, dout:tang(eAng2, ad),
+                   arcId:'arc-' + ci + '-' + (d===1 ? 0 : 1) });
+    }
+  });
+})();
+
+let board, turn, selected, targets, gameOver, winner, aiThinking=false;
+
+function initBoard(){
+  board = [];
+  for (let i=0;i<N;i++){ board[i]=[]; for(let j=0;j<N;j++) board[i][j]=0; }
+  // 橙方（上两行）与蓝方（下两行）各 12 子，铺满两整行
+  for (let i=0;i<N;i++){
+    board[i][0]=1; board[i][1]=1;
+    board[i][4]=2; board[i][5]=2;
+  }
+  turn = Math.random() < 0.5 ? 1 : 2;                // 开局随机起始方
+  selected = null; targets = {};
+  gameOver = false; winner = 0;
+}
+
+/* ---- 走子 / 吃子生成 ---- */
+function getNormalTargets(si, sj){
+  const res = [];
+  for (const d of DIRS8){
+    const ni=si+d.i, nj=sj+d.j;
+    if (inB(ni,nj) && board[ni][nj]===0) res.push({i:ni,j:nj});
+  }
+  return res;
+}
+
+// 计算吃子信息：返回 Map( targetKey -> { type:'capture', path } )
+// path 是一段段“折线(line)”或“圆弧(arc)”的序列，供吃子动画沿路径移动棋子使用
+function computeCaptureInfo(si, sj, player){
+  const info = new Map();
+  const saved = board[si][sj];
+  board[si][sj] = 0;                                 // 起子已离开
+
+  const addTarget = (k, segs) => { if (!info.has(k)) info.set(k, { type:'capture', path: segs }); };
+
+  // 若起子正好在弧线起点，可直接沿箭头进入弧线（此时第一步出棋盘到弧线上）
+  for (const t of TRANS){
+    if (t.from.i===si && t.from.j===sj){
+      const ti=t.to.i, tj=t.to.j, occ=board[ti][tj];
+      const segs = [{ type:'arc', id:t.arcId }];
+      if (occ === player){ /* 弧线尽头首遇己方 -> 不可吃 */ }
+      else if (occ !== 0){ addTarget(key(ti,tj), segs); }   // 弧线尽头首遇对方 -> 吃掉
+      else {
+        const visited = new Set();
+        explore(ti, tj, t.dout, true, visited, segs, info, player, addTarget);
+      }
+    }
+  }
+
+  for (const d0 of DIRS4){
+    const ni=si+d0.i, nj=sj+d0.j;
+    if (!inB(ni,nj)) continue;
+    const occ = board[ni][nj];
+    if (occ === player) continue;                     // 相邻即为己方 -> 不可
+    if (occ !== 0) continue;                          // 相邻为对方但未经弧 -> 不可吃
+    const visited = new Set();
+    explore(ni, nj, d0, false, visited, [], info, player, addTarget);
+  }
+  board[si][sj] = saved;
+  return info;
+}
+
+// 滑行搜索（带路径记录）；规则同 at()：第一段弧由原点发起，滑行途中不绕弧，绕弧后可链式绕多段弧
+function explore(pi, pj, dir, arcUsed, visited, segs, info, player, addTarget){
+  const vk = key(pi,pj) + '|' + dirName(dir) + '|' + (arcUsed?1:0);
+  if (visited.has(vk)) return;
+  visited.add(vk);
+
+  // 仅当已绕过弧线时，才继续沿箭头方向绕下一段弧（多角链式）
+  if (arcUsed){
+    for (const t of TRANS){
+      if (t.from.i===pi && t.from.j===pj && t.din.i===dir.i && t.din.j===dir.j){
+        const ti=t.to.i, tj=t.to.j, occ=board[ti][tj];
+        const nsegs = segs.concat([{ type:'arc', id:t.arcId }]);
+        if (occ === player){ /* 弧线尽头首遇己方 -> 不可吃 */ }
+        else if (occ !== 0){ addTarget(key(ti,tj), nsegs); }   // 弧线尽头首遇对方 -> 吃掉
+        else { explore(ti, tj, t.dout, true, visited, nsegs, info, player, addTarget); }
+      }
+    }
+  }
+
+  // 沿当前方向继续直行（已绕过弧线后才能吃子）
+  const ni=pi+dir.i, nj=pj+dir.j;
+  if (inB(ni,nj)){
+    const occ = board[ni][nj];
+    if (occ === player){ /* 首遇己方棋子 -> 不允许吃子 */ }
+    else if (occ !== 0){
+      if (arcUsed){
+        const nsegs = segs.concat([{ type:'line', x1:px(pi), y1:py(pj), x2:px(ni), y2:py(nj) }]);
+        addTarget(key(ni,nj), nsegs);
+      }
+    } else {
+      const nsegs = segs.concat([{ type:'line', x1:px(pi), y1:py(pj), x2:px(ni), y2:py(nj) }]);
+      explore(ni, nj, dir, arcUsed, visited, nsegs, info, player, addTarget);
+    }
+  }
+  visited.delete(vk);
+}
+
+// 旧版 at() 已被带路径记录的 explore() 取代，此处不再保留。
+
+function selectPiece(i,j){
+  selected = {i,j};
+  const nm = getNormalTargets(i,j);
+  const info = computeCaptureInfo(i,j, turn);
+  targets = {};
+  for (const m of nm) targets[key(m.i,m.j)] = { type:'move' };
+  for (const [ck, val] of info) targets[ck] = val;
+  playSound('select');
+  render();
+}
+
+function doMove(ti, tj){
+  const t = targets[key(ti,tj)];
+  const from = selected;
+  const player = turn;
+  const to = { i:ti, j:tj };
+  selected = null; targets = {};
+  startMoveAnim(from, to, t.type, t.path, player);
+}
+
+function count(p){
+  let n=0;
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++) if (board[i][j]===p) n++;
+  return n;
+}
+function anyCapture(p){
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++)
+    if (board[i][j]===p && computeCaptureInfo(i,j,p).size) return true;
+  return false;
+}
+function anyMove(p){
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    if (board[i][j]!==p) continue;
+    if (getNormalTargets(i,j).length) return true;
+    if (computeCaptureInfo(i,j,p).size) return true;
+  }
+  return false;
+}
+
+function afterMove(){
+  const c1 = count(1), c2 = count(2);
+  if (c1 === 0){ gameOver=true; winner=2; }
+  else if (c2 === 0){ gameOver=true; winner=1; }
+  else {
+    turn = turn===1 ? 2 : 1;
+    if (!anyMove(turn)){
+      gameOver = true; winner = turn===1 ? 2 : 1;   // 无子可动者负
+    }
+  }
+  if (gameOver) playSound('win');
+  render();
+  // 人机模式：轮到 AI 时自动行动
+  if (!gameOver && mode === 'ai' && turn === aiPlayer){
+    setTimeout(triggerAI, 360);
+  }
+}
+
+/* ---- AI（人机对战） ---- */
+// 生成某方全部合法走法：普通走子 + 沿弧吃子
+function allMoves(p){
+  const moves = [];
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    if (board[i][j] !== p) continue;
+    for (const m of getNormalTargets(i,j))
+      moves.push({ from:{i,j}, to:m, type:'move', path:null, cap:0 });
+    const info = computeCaptureInfo(i,j,p);
+    for (const [k,val] of info){
+      const [ti,tj] = k.split(',').map(Number);
+      moves.push({ from:{i,j}, to:{i:ti,j:tj}, type:'capture', path:val.path, cap:1 });
+    }
+  }
+  return moves;
+}
+
+// 在真实棋盘上试走/撤销（用于搜索）
+function applySim(mv, p){
+  const f = board[mv.from.i][mv.from.j], t = board[mv.to.i][mv.to.j];
+  board[mv.from.i][mv.from.j] = 0;
+  board[mv.to.i][mv.to.j] = p;
+  return { fi:mv.from.i, fj:mv.from.j, f, ti:mv.to.i, tj:mv.to.j, t };
+}
+function undoSim(s){
+  board[s.fi][s.fj] = s.f;
+  board[s.ti][s.tj] = s.t;
+}
+
+// 局面评估（从 AI 视角）：子力差 + 向对方推进的位置奖励
+function evalBoard(ai){
+  const opp = ai === 1 ? 2 : 1;
+  let s = count(ai) - count(opp);
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    const v = board[i][j]; if (!v) continue;
+    const adv = v === 1 ? j : (N - 1 - j);           // 橙向下、蓝向上推进
+    const b = (adv / (N - 1)) * 0.25;
+    s += (v === ai ? b : -b);
+  }
+  return s;
+}
+
+// 带 Alpha-Beta 剪枝的极小化极大搜索
+function minimax(p, depth, alpha, beta, ai){
+  const c1 = count(1), c2 = count(2);
+  if (c1 === 0) return ai === 1 ? -1000 : 1000;
+  if (c2 === 0) return ai === 2 ? -1000 : 1000;
+  const moves = allMoves(p);
+  if (moves.length === 0) return p === ai ? (-1000 - depth) : (1000 + depth);
+  if (depth === 0) return evalBoard(ai);
+  moves.sort((a,b)=> b.cap - a.cap);                  // 吃子优先，提升剪枝效率
+  const opp = p === 1 ? 2 : 1;
+  if (p === ai){
+    let best = -Infinity;
+    for (const mv of moves){
+      const st = applySim(mv, p);
+      const v = minimax(opp, depth - 1, alpha, beta, ai);
+      undoSim(st);
+      if (v > best) best = v;
+      if (best > alpha) alpha = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  } else {
+    let best = Infinity;
+    for (const mv of moves){
+      const st = applySim(mv, p);
+      const v = minimax(opp, depth - 1, alpha, beta, ai);
+      undoSim(st);
+      if (v < best) best = v;
+      if (best < beta) beta = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+}
+
+// 根节点选最优走法（同分随机，避免呆板）
+function aiChooseMove(){
+  const moves = allMoves(aiPlayer);
+  if (!moves.length) return null;
+  moves.sort((a,b)=> b.cap - a.cap);
+  let alpha = -Infinity, bestVal = -Infinity; const best = [];
+  const opp = aiPlayer === 1 ? 2 : 1;
+  for (const mv of moves){
+    const st = applySim(mv, aiPlayer);
+    const v = minimax(opp, aiDepth - 1, alpha, Infinity, aiPlayer);
+    undoSim(st);
+    if (v > bestVal + 1e-9){ bestVal = v; best.length = 0; best.push(mv); }
+    else if (Math.abs(v - bestVal) <= 1e-9){ best.push(mv); }
+    if (v > alpha) alpha = v;
+  }
+  return best[Math.floor(Math.random() * best.length)];
+}
+
+function triggerAI(){
+  if (gameOver || anim || mode !== 'ai' || turn !== aiPlayer) return;
+  aiThinking = true; updateStatus();                  // 先显示“思考中”，下一帧再计算（避免卡顿无反馈）
+  setTimeout(() => {
+    if (gameOver || anim || mode !== 'ai'){ aiThinking = false; updateStatus(); return; }
+    const mv = aiChooseMove();
+    aiThinking = false;
+    if (!mv){ updateStatus(); return; }
+    startMoveAnim(mv.from, mv.to, mv.type, mv.path, aiPlayer);
+    updateStatus();
+  }, 60);
+}
+
+/* ---- 渲染 ---- */
+let piecesG, overlayG;
+let anim = null, animPos = null;          // anim: 进行中的走子动画；animPos: 当前帧的移动棋子坐标
+function initGroups(){
+  piecesG = el('g', {id:'pieces'});
+  overlayG = el('g', {id:'overlay'});
+  svg.appendChild(piecesG);
+  svg.appendChild(overlayG);
+}
+
+function render(){
+  while (piecesG.firstChild) piecesG.removeChild(piecesG.firstChild);
+  while (overlayG.firstChild) overlayG.removeChild(overlayG.firstChild);
+
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    const v = board[i][j];
+    if (!v) continue;
+    if (animPos && anim && anim.from.i===i && anim.from.j===j) continue;  // 移动中的棋子另行绘制
+    const isSel = selected && selected.i===i && selected.j===j;
+    const circ = el('circle', {
+      cx:px(i), cy:py(j), r:CELL*0.36,
+      fill: v===1 ? C.cw : C.ccw,
+      stroke: isSel ? '#fff' : '#0b0e14',
+      'stroke-width': isSel ? 4 : 2
+    });
+    piecesG.appendChild(circ);
+  }
+
+  for (const k in targets){
+    const [ti,tj] = k.split(',').map(Number);
+    const t = targets[k];
+    if (t.type === 'move'){
+      overlayG.appendChild(el('circle', {
+        cx:px(ti), cy:py(tj), r:CELL*0.16, fill:'#000', 'fill-opacity':0.28
+      }));
+    } else {
+      overlayG.appendChild(el('circle', {
+        cx:px(ti), cy:py(tj), r:CELL*0.44, fill:'none',
+        stroke:'#39d98a', 'stroke-width':3.5
+      }));
+    }
+  }
+
+  if (selected){
+    overlayG.appendChild(el('circle', {
+      cx:px(selected.i), cy:py(selected.j), r:CELL*0.48, fill:'none',
+      stroke:'#fff', 'stroke-width':3, 'stroke-dasharray':'6 5'
+    }));
+  }
+
+  if (animPos){
+    const r = CELL*0.36 * (anim.scale || 1);
+    piecesG.appendChild(el('circle', {
+      cx:animPos.x, cy:animPos.y, r:r,
+      fill: anim.player===1 ? C.cw : C.ccw, stroke:'#0b0e14', 'stroke-width':2
+    }));
+  }
+  updateStatus();
+}
+
+function updateStatus(){
+  const s = document.getElementById('status');
+  if (aiThinking){
+    s.innerHTML = '<b>' + (aiPlayer===1 ? '橙方' : '蓝方') + '（AI）</b> 思考中…';
+    return;
+  }
+  if (gameOver){
+    const name = winner===1 ? '橙方' : '蓝方';
+    s.innerHTML = '游戏结束：<b>'+name+'</b> 获胜';
+  } else {
+    let name = turn===1 ? '橙方' : '蓝方';
+    if (mode === 'ai') name += (turn === aiPlayer ? '（AI）' : '（你）');
+    s.innerHTML = '当前回合：<b>'+name+'</b> &nbsp;·&nbsp; 橙 '+count(1)+' &nbsp;·&nbsp; 蓝 '+count(2);
+  }
+}
+
+/* ---- 走子动画 ---- */
+function easeInOut(t){ return t < 0.5 ? 2*t*t : 1 - Math.pow(-2*t + 2, 2)/2; }
+
+// 拿起/放下：起步放大到 110%、落子前收回 100%，营造“拾起棋子”的手感
+function moveScale(t){
+  const peak = 1.1, up = 0.18, down = 0.82;
+  if (t < up)   return 1 + (peak - 1) * (t / up);
+  if (t > down) return 1 + (peak - 1) * ((1 - t) / (1 - down));
+  return peak;
+}
+
+// 将一段段 line / arc 组织为可按距离采样的路径几何
+function buildPathGeom(segs){
+  const parts = [];
+  for (const s of segs){
+    if (s.type === 'line'){
+      const len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1);
+      parts.push({ kind:'line', x1:s.x1, y1:s.y1, x2:s.x2, y2:s.y2, len });
+    } else {
+      const elp = document.getElementById(s.id);
+      const total = elp.getTotalLength();
+      parts.push({ kind:'arc', el:elp, total, len:total });
+    }
+  }
+  const total = parts.reduce((a,p)=>a+p.len, 0);
+  return { parts, total };
+}
+
+// 沿路径在距离 dist 处取坐标（line 线性插值，arc 用 SVG 原生采样，方向与绘制箭头一致）
+function pointAt(geom, dist){
+  let d = dist;
+  const parts = geom.parts;
+  for (let k=0;k<parts.length;k++){
+    const p = parts[k];
+    if (d <= p.len || k === parts.length - 1){
+      const t = p.len > 0 ? Math.min(1, d/p.len) : 0;
+      if (p.kind === 'line'){
+        return { x: p.x1 + (p.x2-p.x1)*t, y: p.y1 + (p.y2-p.y1)*t };
+      }
+      const pt = p.el.getPointAtLength(t * p.total);
+      return { x: pt.x, y: pt.y };
+    }
+    d -= p.len;
+  }
+  const last = parts[parts.length-1];
+  if (last.kind === 'line') return { x:last.x2, y:last.y2 };
+  const pt = last.el.getPointAtLength(last.total);
+  return { x: pt.x, y: pt.y };
+}
+
+function startMoveAnim(from, to, type, path, player){
+  const geom = path ? buildPathGeom(path) : null;
+  const dist = geom ? geom.total
+                    : Math.hypot(px(to.i)-px(from.i), py(to.j)-py(from.j));
+  const speed = 860;                                   // px / 秒（约为原速度的 2 倍）
+  const dur = Math.max(110, dist / speed * 1000);
+  anim = { from, to, type, player, geom, start: performance.now(), dur, scale:1 };
+  if (type !== 'capture') playSound('move');   // 普通走子音在起步时播放
+  requestAnimationFrame(animTick);
+}
+
+function animTick(now){
+  if (!anim) return;
+  const t = (now - anim.start) / anim.dur;
+  const scale = moveScale(t);
+  if (t >= 1){
+    anim.scale = 1;
+    animPos = { x:px(anim.to.i), y:py(anim.to.j) };
+    render();
+    animPos = null;
+    if (anim.type === 'capture'){
+      // 我方(=1)吃对方 -> 返回来播放两个音节；对方吃我方 -> 正向两音节
+      playSound('capture', { reverse: anim.player === 1 });
+    }
+    finishMove();
+    return;
+  }
+  const e = easeInOut(t);
+  const pos = anim.geom
+    ? pointAt(anim.geom, e * anim.geom.total)
+    : { x: px(anim.from.i) + (px(anim.to.i)-px(anim.from.i))*e,
+        y: py(anim.from.j) + (py(anim.to.j)-py(anim.from.j))*e };
+  anim.scale = scale;
+  animPos = pos; render(); animPos = null;
+  requestAnimationFrame(animTick);
+}
+
+function finishMove(){
+  const { from, to, player } = anim;
+  board[from.i][from.j] = 0;
+  board[to.i][to.j] = player;                          // 落点原为对方子则被吃掉（只吃第一枚）
+  anim = null;
+  afterMove();
+}
+
+/* ---- 音效（Web Audio 合成，无需外部文件） ---- */
+let audioCtx = null;
+function playSound(kind, opts){
+  try{
+    opts = opts || {};
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    const ctx = audioCtx, T = ctx.currentTime;
+    const tone = (freq, dur, type, gain, when) => {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type; o.frequency.value = freq;
+      o.connect(g); g.connect(ctx.destination);
+      const t0 = T + (when || 0);
+      g.gain.setValueAtTime(0.0001, t0);
+      g.gain.exponentialRampToValueAtTime(gain, t0 + 0.012);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+      o.start(t0); o.stop(t0 + dur + 0.03);
+    };
+    if (kind === 'move'){
+      tone(540, 0.12, 'triangle', 0.18, 0);
+      tone(820, 0.08, 'sine', 0.10, 0.02);
+    } else if (kind === 'capture'){
+      // 木质"咔哒"双敲：快速衰减的木质共鸣 + 起手噪声点击，似棋子相撞
+      const sr = ctx.sampleRate, dur = 0.26, n = Math.floor(sr*dur);
+      const buf = ctx.createBuffer(1, n, sr), d = buf.getChannelData(0);
+      const noise = new Float32Array(n);
+      for (let i=0;i<n;i++) noise[i] = Math.random()*2-1;
+      const knocks = opts.reverse
+        ? [ { f:780, t0:0.00, peak:0.30 }, { f:540, t0:0.11, peak:0.26 } ]
+        : [ { f:540, t0:0.00, peak:0.26 }, { f:780, t0:0.11, peak:0.30 } ];
+      for (let i=0;i<n;i++){
+        const t = i/sr; let s = 0;
+        for (const k of knocks){
+          const dt = t - k.t0;
+          if (dt >= 0 && dt < 0.10){
+            const env = Math.exp(-dt*42);                 // 快速衰减的木质共鸣
+            s += Math.sin(2*Math.PI*k.f*dt) * env * k.peak;
+            if (dt < 0.008) s += noise[i] * (1 - dt/0.008) * 0.30;  // 起手"咔"
+          }
+        }
+        d[i]=s;
+      }
+      const src = ctx.createBufferSource(); src.buffer = buf;
+      src.connect(ctx.destination); src.start(T);
+    } else if (kind === 'win'){
+      [523, 659, 784, 1047].forEach((f,i)=> tone(f, 0.28, 'triangle', 0.20, i*0.13));
+    } else if (kind === 'select'){
+      tone(460, 0.06, 'sine', 0.10, 0);
+    }
+  } catch(e){ /* 音频不可用时忽略 */ }
+}
+
+/* ---- 交互 ---- */
+function onClick(evt){
+  if (gameOver || anim) return;                        // 动画进行中禁止操作
+  if (mode === 'ai' && turn !== humanPlayer) return;   // 人机模式下非己方回合忽略点击
+  const pt = svg.createSVGPoint();
+  pt.x = evt.clientX; pt.y = evt.clientY;
+  const loc = pt.matrixTransform(svg.getScreenCTM().inverse());
+  let best=null, bd=1e9;
+  for (let i=0;i<N;i++) for (let j=0;j<N;j++){
+    const dx=loc.x-px(i), dy=loc.y-py(j), d=dx*dx+dy*dy;
+    if (d<bd){ bd=d; best={i,j}; }
+  }
+  if (!best || bd > (CELL*0.6)*(CELL*0.6)) return;
+
+  const v = board[best.i][best.j];
+  if (selected){
+    const kk = key(best.i,best.j);
+    if (targets[kk]){ doMove(best.i,best.j); return; }
+    if (v === turn){ selectPiece(best.i,best.j); return; }
+    selected = null; targets = {}; render(); return;
+  } else if (v === turn){
+    selectPiece(best.i,best.j);
+  }
+}
+svg.addEventListener('click', onClick);
+
+/* ---- 模式 / 难度 控件 ---- */
+let mode = 'pvp', humanPlayer = 2, aiPlayer = 1, aiDepth = 3;
+const modeSel = document.getElementById('mode');
+const diffSel = document.getElementById('diff');
+
+function syncMode(){
+  mode = modeSel.value;
+  // AI 固定执橙方(=1)，人类执蓝方(=2)
+  aiPlayer = 1; humanPlayer = 2;
+  aiDepth = parseInt(diffSel.value, 10);
+  diffSel.disabled = (mode !== 'ai');
+}
+modeSel.addEventListener('change', syncMode);
+diffSel.addEventListener('change', syncMode);
+
+document.getElementById('restart').onclick = () => {
+  anim = null; selected = null; targets = {}; aiThinking = false;
+  initBoard(); syncMode(); render();
+  if (mode === 'ai' && turn === aiPlayer) setTimeout(triggerAI, 400);
+};
+
+syncMode();
+initBoard();
+initGroups();
+render();
+if (mode === 'ai' && turn === aiPlayer) setTimeout(triggerAI, 400);
+</script>
+
+<style>
+  #net{min-height:20px; font-size:13px; color:var(--muted); text-align:center; word-break:break-all}
+  #net .ok{color:#39d98a}
+  #net .wait{color:#98a2b3}
+  #net .err{color:#ff8a80}
+  #lobby{
+    display:flex; flex-direction:column; align-items:center; gap:12px;
+    background:linear-gradient(180deg,#1c2434,#151b26);
+    border:1px solid #263042; border-radius:18px; padding:26px 30px;
+    box-shadow:0 20px 50px rgba(0,0,0,.45); max-width:520px;
+  }
+  .lobby-title{font-size:17px; font-weight:600; letter-spacing:.5px}
+  #lobby .sub{line-height:1.9}
+  #lobby b{color:#fff}
+  button:disabled{opacity:.45; cursor:not-allowed}
+  button:disabled:hover{background:#232c3d}
+  button.primary{
+    background:#f0913c; border-color:#f0913c; color:#151b26;
+    font-size:15px; font-weight:600; padding:10px 34px;
+  }
+  button.primary:hover{background:#ffa159}
+  button.primary:disabled{background:#232c3d; border-color:#2f3a4e; color:#6b7688; cursor:not-allowed}
+  .turn-ring{animation:skTurn 1.5s ease-in-out infinite; transform-box:fill-box; transform-origin:center}
+  @keyframes skTurn{
+    0%{transform:scale(.8); opacity:.9}
+    50%{transform:scale(1.15); opacity:.35}
+    100%{transform:scale(.8); opacity:.9}
+  }
+</style>
+
+<script>
+/* ===================== 联机层（复用上面照抄自 game.html 的界面与逻辑） ===================== */
+(function () {
+  var B = window.__MULTI_BOOTSTRAP__ || {};
+  var vs = (typeof acquireVsCodeApi === 'function') ? acquireVsCodeApi() : null;
+  function post(msg){ if (vs) vs.postMessage(msg); }
+  function esc(s){
+    return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) {
+      return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c];
+    });
+  }
+
+  var role = B.role === 'host' ? 'host' : 'client';
+  var myPlayer = role === 'host' ? 1 : 2;          // 房主执橙方(=1)，客机执蓝方(=2)
+  var myNick = B.nickname || (role === 'host' ? '房主' : '玩家');
+  var names = { 1: role === 'host' ? myNick : '对手', 2: role === 'host' ? '对手' : myNick };
+  var soundOn = B.sound !== false;
+  var connected = false, started = false;
+  var netMsg = '正在建立联机…', netErr = false;
+  var pending = [];
+
+  var BOARD = SIZE * CELL;                 // 方格地图边长
+  var VB = 2 * PAD + BOARD;                // svg viewBox 边长（棋盘居中）
+  var flipped = role === 'host';           // 房主执橙方，视图旋转 180° 让己方棋子在下方
+
+  /* ---- 音效开关（由 TreeView「音效开关」控制） ---- */
+  var rawPlaySound = playSound;
+  playSound = function (kind, opts) { if (!soundOn) return; rawPlaySound(kind, opts); };
+
+  /* ---- 棋盘镜像：房主侧整体旋转 180°（弧线与箭头同步旋转，规则不变） ---- */
+  var turnG = el('g', { id: 'turnIcon' });
+  if (flipped) {
+    var wrap = el('g', { transform: 'rotate(180 ' + (VB / 2) + ' ' + (VB / 2) + ')' });
+    while (svg.firstChild) wrap.appendChild(svg.firstChild);
+    svg.appendChild(wrap);
+  }
+  svg.appendChild(turnG);                  // 行动方图标画在镜像之外，按自己的视角定位
+
+  /* ---- 联机固定双人对战（人机控件已隐藏） ---- */
+  modeSel.value = 'pvp';
+  syncMode();
+
+  /* ---- 阶段：lobby（等待开始）/ game（对局中） ---- */
+  var elLobby = document.getElementById('lobby');
+  var elLobbyInfo = document.getElementById('lobby-info');
+  var elStart = document.getElementById('startBtn');
+  var elNet = document.getElementById('net');
+
+  function setStarted(v) {
+    started = v;
+    elLobby.style.display = v ? 'none' : '';
+    ['.stage', '#status', '.controls', '.legend', '.note'].forEach(function (sel) {
+      var e = document.querySelector(sel);
+      if (e) e.style.display = v ? '' : 'none';
+    });
+  }
+
+  // 只有房主能改变对局状态（开始 / 重新开始），客机只能等待
+  function renderLobby() {
+    var opp = names[myPlayer === 1 ? 2 : 1];
+    elLobbyInfo.innerHTML =
+      '你是<b>' + (role === 'host' ? '房主' : '客机') + '</b>，执' + (myPlayer === 1 ? '橙方' : '蓝方') +
+      '（' + esc(myNick) + '），棋子显示在下方<br>对手：' + esc(opp) +
+      '<br>' + (connected
+        ? (role === 'host' ? '对手已加入，点击「开始对战」开始' : '已加入房间，等待房主开始…')
+        : (role === 'host' ? '等待对手加入…' : '正在连接房主…'));
+    elStart.disabled = !(role === 'host' && connected);
+    elStart.textContent = (role !== 'host')
+      ? (connected ? '等待房主开始…' : '正在连接房主…')
+      : (connected ? '开始对战' : '等待对手加入…');
+  }
+
+  /* ---- 状态栏：追加联机信息与双方昵称 ---- */
+  var rawUpdateStatus = updateStatus;
+  updateStatus = function () {
+    rawUpdateStatus();
+    var s = document.getElementById('status');
+    if (s) {
+      s.innerHTML = s.innerHTML
+        .replace('橙方', '橙方（' + esc(names[1]) + '）')
+        .replace('蓝方', '蓝方（' + esc(names[2]) + '）');
+    }
+    var p1 = document.querySelector('.legend .pn1'), p2 = document.querySelector('.legend .pn2');
+    if (p1) p1.textContent = '橙方（' + names[1] + '）';
+    if (p2) p2.textContent = '蓝方（' + names[2] + '）';
+    if (elNet) {
+      var side = '房间 ' + B.host + ':' + B.port + '（你执' + (myPlayer === 1 ? '橙方' : '蓝方') + '）';
+      var tail;
+      if (gameOver && winner) {
+        var wname = (winner === 1 ? '橙方' : '蓝方') + '（' + names[winner] + '）';
+        tail = '<span class="ok">对局结束：' + esc(wname) + ' 获胜，' +
+               (winner === myPlayer ? '你赢了' : '你输了') + '</span>';
+      } else if (started && connected && !gameOver) {
+        tail = turn === myPlayer
+          ? '<span class="ok">轮到你行棋</span>'
+          : '<span class="wait">等待对手行棋</span>';
+      } else {
+        tail = '<span class="' + (netErr ? 'err' : 'ok') + '">' + esc(netMsg) + '</span>';
+      }
+      elNet.innerHTML = side + ' &nbsp;·&nbsp; ' + tail;
+    }
+    renderTurnIcon();
+  };
+  function setNet(msg, err){ netMsg = msg; netErr = !!err; }
+
+  // 轮到行动的一方：己方回合图标在方格下方、对手回合在上方，左右居中，距棋盘边缘一格
+  function renderTurnIcon() {
+    while (turnG.firstChild) turnG.removeChild(turnG.firstChild);
+    if (!started || gameOver) return;
+    var mine = turn === myPlayer;
+    var cx = PAD + BOARD / 2;
+    var cy = mine ? (PAD + BOARD + CELL) : (PAD - CELL);
+    var color = turn === 1 ? C.cw : C.ccw;
+    turnG.appendChild(el('circle', { cx: cx, cy: cy, r: 17, fill: 'none', stroke: color,
+      'stroke-width': 2, 'stroke-opacity': 0.55, class: 'turn-ring' }));
+    turnG.appendChild(el('circle', { cx: cx, cy: cy, r: 10, fill: color, stroke: '#0b0e14', 'stroke-width': 2 }));
+  }
+
+  /* ---- 开局 / 同步 ---- */
+  function initGame(first, nm){
+    anim = null; selected = null; targets = {}; aiThinking = false;
+    if (nm) { if (nm[1]) names[1] = nm[1]; if (nm[2]) names[2] = nm[2]; }
+    names[myPlayer] = myNick;
+    initBoard();
+    if (first === 1 || first === 2) turn = first;
+    syncMode();
+    setStarted(true);                    // 开局后才显示棋盘
+    renderLobby();
+    render();
+  }
+  function newGame(){
+    var first = Math.random() < 0.5 ? 1 : 2;
+    names[myPlayer] = myNick;
+    var nm = { 1: names[1], 2: names[2] };
+    initGame(first, nm);
+    post({ type: 'startGame', first: first, names: nm });
+  }
+
+  /* ---- 本地走子：照常执行，并同步给对手 ---- */
+  var rawDoMove = doMove;
+  doMove = function (ti, tj) {
+    var t = targets[key(ti, tj)];
+    var mv = { from: { i: selected.i, j: selected.j }, to: { i: ti, j: tj },
+               type: t ? t.type : 'move', player: turn };
+    rawDoMove(ti, tj);
+    post({ type: 'move', move: mv });
+  };
+
+  /* ---- 远端走子：本地重放（双方逻辑一致，棋盘同步推进） ---- */
+  function applyRemote(mv){
+    if (!mv || !mv.from || !mv.to || gameOver) return;
+    if (anim) { pending.push(mv); return; }
+    var info = computeCaptureInfo(mv.from.i, mv.from.j, mv.player);
+    var hit = info.get(key(mv.to.i, mv.to.j));
+    var path = (mv.type === 'capture' && hit) ? hit.path : null;
+    selected = null; targets = {};
+    startMoveAnim(mv.from, mv.to, mv.type, path, mv.player);
+  }
+  var rawFinishMove = finishMove;
+  finishMove = function () {
+    rawFinishMove();
+    if (pending.length) {
+      var mv = pending.shift();
+      setTimeout(function () { applyRemote(mv); }, 80);
+    }
+  };
+
+  /* ---- 只允许己方回合落子；房主视图已镜像，点击坐标需反向映射 ---- */
+  function mirrorEvent(e) {
+    var m = svg.getScreenCTM();
+    if (!m) return e;
+    var p = svg.createSVGPoint();
+    p.x = e.clientX; p.y = e.clientY;
+    var loc = p.matrixTransform(m.inverse());
+    var q = svg.createSVGPoint();
+    q.x = VB - loc.x; q.y = VB - loc.y;             // 180° 旋转的逆变换即其自身
+    var scr = q.matrixTransform(m);
+    return { clientX: scr.x, clientY: scr.y };
+  }
+  var rawOnClick = onClick;
+  svg.removeEventListener('click', onClick);
+  svg.addEventListener('click', function (e) {
+    if (!started || !connected || gameOver || anim || turn !== myPlayer) return;
+    rawOnClick(flipped ? mirrorEvent(e) : e);
+  });
+
+  /* ---- 开始对战：仅房主可操作 ---- */
+  elStart.onclick = function () {
+    if (role !== 'host' || !connected) return;
+    newGame();
+  };
+
+  /* ---- 重新开始：仅房主可操作，客机按钮禁用 ---- */
+  var elRestart = document.getElementById('restart');
+  elRestart.onclick = function () {
+    if (role === 'host') newGame();
+  };
+  if (role !== 'host') {
+    elRestart.disabled = true;
+    elRestart.title = '只有房主可以开始 / 重新开始';
+    elRestart.textContent = '重新开始（房主）';
+  }
+
+  /* ---- 与扩展端（common 联机模块）通信 ---- */
+  window.addEventListener('message', function (e) {
+    var m = e.data; if (!m) return;
+    switch (m.type) {
+      case 'hostReady':
+        setNet('房间已创建，等待对手加入…'); renderLobby(); render(); break;
+      case 'hostError':
+        connected = false; setNet(m.message || '创建房间失败', true); renderLobby(); render(); break;
+      case 'peerConnected':
+        connected = true; setNet('对手已加入，可点击「开始对战」');
+        post({ type: 'nick', name: myNick });
+        renderLobby(); render(); break;
+      case 'peerDisconnected':
+        connected = false; setStarted(false);
+        setNet('对手已离开', true); renderLobby(); render(); break;
+      case 'clientConnected':
+        connected = true; setNet('已连接房主，可点击「开始对战」');
+        post({ type: 'nick', name: myNick }); renderLobby(); render(); break;
+      case 'clientDisconnected':
+        connected = false; setStarted(false);
+        setNet('连接已断开', true); renderLobby(); render(); break;
+      case 'clientTimeout':
+      case 'clientRefused':
+      case 'clientError':
+        connected = false; setStarted(false);
+        setNet(m.message || '连接房间失败', true); renderLobby(); render(); break;
+      case 'nick':
+        if (role === 'host') {
+          names[2] = m.name || names[2];
+          post({ type: 'names', names: { 1: names[1], 2: names[2] } });
+        } else {
+          names[1] = m.name || names[1];
+        }
+        renderLobby(); render(); break;
+      case 'names':
+        if (m.names) { if (m.names[1]) names[1] = m.names[1]; if (m.names[2]) names[2] = m.names[2]; }
+        renderLobby(); render(); break;
+      case 'startGame':
+        connected = true; initGame(m.first, m.names);
+        setNet('对局进行中'); render(); break;
+      case 'move': if (started) applyRemote(m.move); break;
+      case 'sound': soundOn = m.on !== false; break;
+      case 'setNick':
+        myNick = m.name || myNick; names[myPlayer] = myNick;
+        if (role === 'host') post({ type: 'names', names: { 1: names[1], 2: names[2] } });
+        else post({ type: 'nick', name: myNick });
+        renderLobby(); render(); break;
+    }
+  });
+
+  setStarted(false);                   // 开局前只显示等待/开始界面
+  renderLobby();
+  render();
+})();
+</script>
+
+</body>
+</html>

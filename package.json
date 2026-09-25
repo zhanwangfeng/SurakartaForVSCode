@@ -2,7 +2,7 @@
   "name": "surakarta-vscode",
   "displayName": "Surakarta",
   "description": "VS Code 里的苏拉卡尔塔（Surakarta）棋盘小游戏：双人对战或与 AI 对弈，沿同心弧线绕行吃子。",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "publisher": "zhanwangfeng",
   "license": "MIT",
   "icon": "resources/icon.png",
@@ -30,8 +30,15 @@
   ],
   "activationEvents": [
     "onView:surakarta.modes",
-    "onCommand:surakarta.open"
+    "onCommand:surakarta.open",
+    "onCommand:surakarta.multiCreate",
+    "onCommand:surakarta.multiJoin",
+    "onCommand:surakarta.setNickname",
+    "onCommand:surakarta.toggleSound"
   ],
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
   "main": "./out/extension.js",
   "contributes": {
     "viewsContainers": {
@@ -66,6 +73,26 @@
         "command": "surakarta.openWeb",
         "title": "Surakarta: 打开网页版",
         "icon": "$(globe)"
+      },
+      {
+        "command": "surakarta.multiCreate",
+        "title": "Surakarta: 创建房间",
+        "icon": "$(radio-tower)"
+      },
+      {
+        "command": "surakarta.multiJoin",
+        "title": "Surakarta: 加入房间",
+        "icon": "$(sign-in)"
+      },
+      {
+        "command": "surakarta.setNickname",
+        "title": "Surakarta: 设定昵称",
+        "icon": "$(account)"
+      },
+      {
+        "command": "surakarta.toggleSound",
+        "title": "Surakarta: 音效开关",
+        "icon": "$(unmute)"
       }
     ],
     "menus": {
@@ -76,17 +103,27 @@
           "group": "navigation"
         }
       ]
+    },
+    "configuration": {
+      "title": "Surakarta",
+      "properties": {
+        "surakarta.multiPort": {
+          "type": "number",
+          "default": 18766,
+          "description": "联机对战的监听端口（房主与加入方需一致）"
+        }
+      }
     }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
     "compile": "tsc --noEmit -p ./ && esbuild src/extension.ts --bundle --platform=node --target=node16 --outfile=out/extension.js --external:vscode",
-    "watch": "tsc --noEmit -p ./ & esbuild src/extension.ts --bundle --platform=node --target=node16 --outfile=out/extension.js --external:vscode --watch",
     "package": "vsce package"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.18.1",
     "@vscode/vsce": "^3.9.2",
     "esbuild": "^0.23.1",
     "typescript": "^5.3.3"
@@ -94,5 +131,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/zhanwangfeng/SurakartaForVSCode.git"
+  },
+  "dependencies": {
+    "ws": "^8.21.3"
   }
 }
